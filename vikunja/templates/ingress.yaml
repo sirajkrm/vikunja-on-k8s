@@ -2,7 +2,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: "{{ .Values.deployments.keycloak.service.name }}"
+  name: "{{ .Values.deployments.frontend.service.name }}"
   namespace: "{{ .Values.namespace }}"
 spec:
   rules:
@@ -13,7 +13,7 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: frontend
+            name: "{{ .Values.deployments.frontend.service.name }}"
             port:
               number: 80
 
@@ -32,7 +32,7 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: vikunja-backend-svc
+            name: "{{ .Values.deployments.backend.service.name }}"
             port:
               number: 3456
 

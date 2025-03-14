@@ -1,7 +1,5 @@
 namespace: vikunja
 
-statefulsets:
-
 deployments:
   frontend:
     service:
