@@ -1,0 +1,37 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: "{{ .Values.deployments.frontend.service.name }}"
+  namespace: "{{ .Values.namespace }}"
+spec:
+  selector:
+    app: "{{ .Values.deployments.frontend.service.name }}"
+  ports:
+  - port: 80
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: "{{ .Values.namespace }}"
+  name: "{{ .Values.deployments.frontend.service.name }}"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: "{{ .Values.deployments.frontend.service.name }}"
+  template:
+    metadata:
+      labels:
+        app: "{{ .Values.deployments.frontend.service.name }}"
+    spec:
+      containers:
+      - name: frontend
+        image: "{{ .Values.deployments.frontend.image.name }}:{{ .Values.deployments.frontend.image.tag }}"
+        resources:
+          limits:
+            memory: "128Mi"
+            cpu: "50m"
+        ports:
+        - containerPort: 80

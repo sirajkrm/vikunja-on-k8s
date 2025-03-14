@@ -1,0 +1,101 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: keycloak-db-secret
+  namespace: keycloak
+type: Opaque
+data:
+  POSTGRES_DB: a2V5Y2xvYWtkYg==             # Base64 encoded value of "keycloakdb"
+  POSTGRES_USER: a2V5Y2xvYWtBZG1pbg==       # Base64 encoded value of "keycloakAdmin"
+  POSTGRES_PASSWORD: a2V5Y2xvYWtQQXNTUw==   # Base64 encoded value of "keycloakPAsSS"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-postgres-svc
+  namespace: keycloak
+  labels:
+    app: keycloak
+spec:
+  clusterIP: None #headless service which return the dns name of pod rather than random name and will always point ot the same pod
+  ports:
+    - port: 5432
+      targetPort: 5432
+      protocol: TCP
+  selector:
+    app: keycloak
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: keycloak-postgres
+  namespace: keycloak
+  labels:
+    app: keycloak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak
+  serviceName: "keycloak-postgres-svc"
+  template:
+    metadata:
+      labels:
+        app: keycloak
+    spec:
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: postgresdb
+          image: postgres:17
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-db-secret
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-db-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-db-secret
+                  key: POSTGRES_PASSWORD
+          ports:
+            - containerPort: 5432
+              #          readinessProbe:
+              #            exec:
+              #command: ["psql", "-w", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)", "-c", "SELECT 1"]
+              #              command: ["pg_isready" ,"-U" ,"keycloakAdmin", "-d" ,"$(POSTGRES_DB)"]
+                #            initialDelaySeconds: 20   #wait 20 seconds before starting
+              #            periodSeconds: 10         #run every 10 seconds
+              #            timeoutSeconds: 5
+              #            successThreshold: 1
+              #            failureThreshold: 3       #if probe fails 3 times in a row, the container is considered not ready
+
+          resources:
+            requests:
+              memory: "500Mi"   # 500 Mebibyte 
+              cpu: "250m"       # 1/4 of 1 vCPU
+            limits:
+              memory: "1Gi"     # 1 Gibibyte
+              cpu: "500m"       # half of 1 vCPU
+
+          volumeMounts:
+            - mountPath: /data
+              name: keycloak-postgres-vol
+  volumeClaimTemplates:
+  - metadata:
+      name: keycloak-postgres-vol
+    spec:
+      storageClassName: longhorn
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 20Gi

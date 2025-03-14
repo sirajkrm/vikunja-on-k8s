@@ -1,0 +1,38 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: "{{ .Values.deployments.keycloak.service.name }}"
+  namespace: "{{ .Values.namespace }}"
+spec:
+  rules:
+  - host: "{{ .Values.deployments.ingress.host }}"
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend
+            port:
+              number: 80
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: "{{ .Values.deployments.backend.service.name }}"
+  namespace: "{{ .Values.namespace }}"
+spec:
+  rules:
+  - host: "{{ .Values.deployments.ingress.host }}"
+    http:
+      paths:
+      - path: /api/v1
+        pathType: Prefix
+        backend:
+          service:
+            name: vikunja-backend-svc
+            port:
+              number: 3456
+

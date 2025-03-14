@@ -1,0 +1,221 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vikunja-postgres-1
+  namespace: vikunja
+data:
+  pg_hba.conf: |+
+    # TYPE  DATABASE        USER            ADDRESS                 METHOD
+    host     replication     replicationuser         0.0.0.0/0        md5
+    # "local" is for Unix domain socket connections only
+    local   all             all                                     trust
+    # IPv4 local connections:
+    host    all             all             127.0.0.1/32            trust
+    # IPv6 local connections:
+    host    all             all             ::1/128                 trust
+    # Allow replication connections from localhost, by a user with the
+    # replication privilege.
+    local   replication     all                                     trust
+    host    replication     all             127.0.0.1/32            trust
+    host    replication     all             ::1/128                 trust
+
+    host all all all scram-sha-256
+  postgresql.conf: |+
+    data_directory = '/data/pgdata'
+    hba_file = '/config/pg_hba.conf'
+    ident_file = '/config/pg_ident.conf'
+
+    port = 5432
+    listen_addresses = '*'
+    max_connections = 100
+    shared_buffers = 128MB
+    dynamic_shared_memory_type = posix
+    max_wal_size = 1GB
+    min_wal_size = 80MB
+    log_timezone = 'Europe/Paris'
+    datestyle = 'iso, mdy'
+    timezone = 'Europe/Paris'
+
+    #locale settings
+    lc_messages = 'en_US.utf8'			# locale for system error message
+    lc_monetary = 'en_US.utf8'			# locale for monetary formatting
+    lc_numeric = 'en_US.utf8'			# locale for number formatting
+    lc_time = 'en_US.utf8'				# locale for time formatting
+
+    default_text_search_config = 'pg_catalog.english'
+
+    #replication
+    wal_level = replica
+    archive_mode = on
+    archive_command = 'test ! -f /data/archive/%f && cp %p /data/archive/%f'
+    max_wal_senders = 3
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-secret
+  namespace: vikunja
+type: Opaque
+data:
+  POSTGRES_DB: dmlrdW5qYQ==                 # Base64 encoded value of "vikunja"
+  POSTGRES_USER: dmlrdW5qYQ==               # Base64 encoded value of "vikunja"
+  POSTGRES_PASSWORD: U3VQM3JTM2NSZXRQQHNT   # Base64 encoded value of "SuP3rS3cRetP@sS"
+  REPLICATION_USER: cmVwdXNlcg==            # Base64 encoded value of "repuser"
+  REPLICATION_PASSWORD: UjNQcEBTc3cwUmQ=    # Base64 encoded value of "R3Pp@Ssw0Rd"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vikunja-postgres
+  namespace: vikunja
+  labels:
+    app: vikunja
+spec:
+  clusterIP: None #headless service which return the dns name of pod rather than random name and will always point ot the same pod
+  ports:
+    - port: 5432
+      targetPort: 5432
+      protocol: TCP
+  selector:
+    app: vikunja
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vikunja-postgres-prm
+  namespace: vikunja
+  labels:
+    app: vikunja
+spec:
+  replicas: 3 
+  selector:
+    matchLabels:
+      app: vikunja
+  serviceName: "vikunja-postgres"
+  template:
+    metadata:
+      labels:
+        app: vikunja
+    spec:
+      terminationGracePeriodSeconds: 20
+      initContainers:
+      - name: init
+        image: postgres:17
+        command: [ "bash", "-c" ]
+        args:
+        - |
+          if [ ${STANDBY_MODE} == "on" ]; 
+          then
+            # initialize from backup if data dir is empty
+            if [ -z "$(ls -A ${PGDATA})" ]; then
+              export PGPASSWORD=${REPLICATION_PASSWORD}
+              pg_basebackup -h ${PRIMARY_SERVER_ADDRESS} -p 5432 -U ${REPLICATION_USER} -D ${PGDATA} -Fp -Xs -R
+            fi
+          else
+            #create archive directory
+            mkdir -p /data/archive && chown -R 999:999 /data/archive
+
+            #create a init template
+            echo "CREATE USER #REPLICATION_USER REPLICATION LOGIN ENCRYPTED PASSWORD '#REPLICATION_PASSWORD';" > init.sql
+            
+            # add credential
+            sed -i 's/#REPLICATION_USER/'${REPLICATION_USER}'/g' init.sql
+            sed -i 's/#REPLICATION_PASSWORD/'${REPLICATION_PASSWORD}'/g' init.sql
+
+            mkdir -p /docker-entrypoint-initdb.d/
+            cp init.sql /docker-entrypoint-initdb.d/init.sql
+          fi
+        env:
+        - name: STANDBY_MODE
+          value: "off"
+        - name: PRIMARY_SERVER_ADDRESS
+          value: ""
+        - name: PGDATA
+          value: "/data/pgdata"
+        - name: REPLICATION_USER
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: REPLICATION_USER
+              optional: false
+        - name: REPLICATION_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: REPLICATION_PASSWORD
+              optional: false
+        volumeMounts:
+        - name: initdb
+          mountPath: /docker-entrypoint-initdb.d
+        - name: postgres-vol
+          mountPath: /data
+          readOnly: false
+      containers:
+        - name: postgresdb
+          image: postgres:17
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              #command: ["psql", "-w", "-U", "$(POSTGRES_USER)", "-d", "$(POSTGRES_DB)", "-c", "SELECT 1"]
+              command: ["pg_isready" ,"-U" ,"vikunja", "-d" ,"$(POSTGRES_DB)"]
+            initialDelaySeconds: 20   #wait 20 seconds before starting
+            periodSeconds: 10         #run every 10 seconds
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 3       #if probe fails 3 times in a row, the container is considered not ready
+
+          resources:
+            requests:
+              memory: "500Mi"   # 500 Mebibyte 
+              cpu: "250m"       # 1/4 of 1 vCPU
+            limits:
+              memory: "1Gi"     # 1 Gibibyte
+              cpu: "500m"       # half of 1 vCPU
+
+          volumeMounts:
+          - name: initdb
+            mountPath: /docker-entrypoint-initdb.d
+          - name: config
+            mountPath: /config
+            readOnly: false
+          - name: postgres-vol
+            mountPath: /data
+            readOnly: false
+      volumes:
+      - name: config
+        configMap:
+          name: vikunja-postgres-1
+          defaultMode: 0755
+      - name: initdb
+        emptyDir: {}
+  volumeClaimTemplates:
+  - metadata:
+      name: postgres-vol
+    spec:
+      storageClassName: longhorn
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 10Gi

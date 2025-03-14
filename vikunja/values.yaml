@@ -1,0 +1,23 @@
+namespace: vikunja
+
+statefulsets:
+
+deployments:
+  frontend:
+    service:
+      name: frontend
+    image:
+      name: vikunja/frontend
+      tag: 0.22.1
+
+  backend:
+    service:
+      name: backend
+      ports:
+        containerPort: 3456
+    image:
+      name: vikunja/api
+      tag: 0.22.1
+
+  ingress:
+    host: my-custom-domain.space.nip.io

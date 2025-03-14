@@ -1,0 +1,13 @@
+apiVersion: v2
+name: vikunja
+description: a helm chart for Vikunja on kubernetes
+
+type: application
+
+# This is the chart version. This version number should be incremented each time you make changes
+version: 1.0
+
+# This is the version number of the application being deployed.
+# Using 0.22 version as it's the latest version deployed a 3-tier microservice app
+# Versions starting from 0.23 are being consolidated as one image in the form of deployment
+appVersion: "0.22.1"
